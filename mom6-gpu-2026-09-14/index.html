@@ -144,58 +144,24 @@ useful</td>
 <section id="representative-block-kernel"
 class="title-slide slide level1">
 <h1>Representative Block Kernel</h1>
-<pre class="fortran"><code>do jsb=js,je,njb ; do isb=is,ie,nib
-  ieb = min(isb + nib - 1, ie)
-  jeb = min(jsb + njb - 1, je)
+<pre class="fortran"><code>do jsb=js,je,njj ; do isb=is,ie,nii
+  ! Block size is nii/njj, truncated at the end
+  ieb = min(isb + nii - 1, ie)
+  jeb = min(jsb + njj - 1, je)
   iie = ieb - isb + 1
   jje = jeb - jsb + 1
 
+  ! Block loops are local
   do concurrent (k=1:nz, jj=1:jje, ii=1:iie)
     i = isb + ii - 1
     j = jsb + jj - 1
     visc_rem(ii,jj,k) = visc_rem_u(i,j,k)
   enddo
 enddo ; enddo</code></pre>
-<p>Outer loops decompose the domain</p>
-<p>Inner loops define the kernel</p>
 </section>
 
-<section id="porting-model" class="title-slide slide level1">
-<h1>Porting Model</h1>
-<table>
-<colgroup>
-<col style="width: 26%" />
-<col style="width: 12%" />
-<col style="width: 62%" />
-</colgroup>
-<tbody>
-<tr class="odd">
-<td><strong>Kernels</strong></td>
-<td>-&gt;</td>
-<td>Fortran <code>do concurrent</code> expresses independent
-iterations</td>
-</tr>
-<tr class="even">
-<td><strong>Residency</strong></td>
-<td>-&gt;</td>
-<td>OpenMP keeps arrays and control structures on device</td>
-</tr>
-<tr class="odd">
-<td><strong>Ordering</strong></td>
-<td>-&gt;</td>
-<td>Vertical dependencies and reductions remain explicit</td>
-</tr>
-<tr class="even">
-<td><strong>Geometry</strong></td>
-<td>-&gt;</td>
-<td>Runtime blocks expose CPU- and GPU-suitable work units</td>
-</tr>
-</tbody>
-</table>
-</section>
-
-<section id="what-this-buys" class="title-slide slide level1">
-<h1>What This Buys</h1>
+<section id="index-convention" class="title-slide slide level1">
+<h1>Index Convention</h1>
 <table>
 <colgroup>
 <col style="width: 28%" />
@@ -203,28 +169,88 @@ iterations</td>
 </colgroup>
 <tbody>
 <tr class="odd">
-<td><strong>Source control</strong></td>
-<td>Solver logic remains recognizable Fortran</td>
+<td><code>i,j,k</code></td>
+<td>Domain-space index</td>
 </tr>
 <tr class="even">
-<td><strong>Data locality</strong></td>
-<td>Block-local arrays reduce global working set pressure</td>
+<td><code>ii,jj,kk</code></td>
+<td>Block-local center index</td>
 </tr>
 <tr class="odd">
-<td><strong>Concurrency</strong></td>
-<td>Horizontal work is exposed at a GPU-friendly granularity</td>
+<td><code>II,JJ,KK</code></td>
+<td>Block-local face index</td>
 </tr>
 <tr class="even">
-<td><strong>Tunability</strong></td>
-<td><code>nib</code> and <code>njb</code> can be chosen per build,
-platform, or solver</td>
+<td><code>(isb:ieb)</code></td>
+<td>Block start/end bounds</td>
+</tr>
+<tr class="odd">
+<td><code>(IsbB:IebB)</code></td>
+<td>Face-aligned block start/end</td>
+</tr>
+<tr class="even">
+<td><code>(1:nii)</code></td>
+<td>Center-indexed block sizes</td>
+</tr>
+<tr class="odd">
+<td><code>(1:nIIB)</code></td>
+<td>Face-aligned block sizes</td>
 </tr>
 </tbody>
 </table>
 </section>
 
-<section id="performance-picture" class="title-slide slide level1">
-<h1>Performance Picture</h1>
+<section id="layout-parameters" class="title-slide slide level1">
+<h1>Layout Parameters</h1>
+<table>
+<colgroup>
+<col style="width: 44%" />
+<col style="width: 56%" />
+</colgroup>
+<tbody>
+<tr class="odd">
+<td><code>CONTINUITY_NIBLOCK</code>,
+<code>CONTINUITY_NJBLOCK</code></td>
+<td>Continuity block size in <code>i</code> and <code>j</code></td>
+</tr>
+<tr class="even">
+<td><code>CONTINUITY_NKBLOCK</code></td>
+<td>Reconstruction block layers</td>
+</tr>
+<tr class="odd">
+<td><code>CORIOLIS_ADV_NKBLOCK</code></td>
+<td>Coriolis/advection</td>
+</tr>
+<tr class="even">
+<td><code>HORVISC_NKBLOCK</code></td>
+<td>Horizontal viscosity</td>
+</tr>
+</tbody>
+</table>
+<p><code>0</code> selects the full local extent in that direction.</p>
+</section>
+
+<section id="wrapper-functions" class="title-slide slide level1">
+<h1>Wrapper functions</h1>
+<pre class="fortran"><code>subroutine CorAdCalc(...)
+  nkk = CS%nkblock
+  if (nkk == 0) nkk = GV%ke
+
+  call CorAdCalc_block(..., nkk, ...)
+end subroutine CorAdCalc
+
+subroutine CorAdCalc_block(...)
+  do ksb = 1,nk,nkk
+    do kk = 1,nkk
+      ! ...
+    enddo
+  enddo
+end subroutine CorAdCalc_block</code></pre>
+<p>Preserve the module API (no changes to RK2, &amp;c)</p>
+</section>
+
+<section id="current-performance" class="title-slide slide level1">
+<h1>Current Performance</h1>
 <p><img data-src="img/dycore_and_main.svg" style="width:84.0%"
 alt="image" /></p>
 </section>
@@ -235,20 +261,18 @@ alt="image" /></p>
 alt="image" /></p>
 </section>
 
-<section id="scaling-picture" class="title-slide slide level1">
-<h1>Scaling Picture</h1>
+<section id="mpi-scaling" class="title-slide slide level1">
+<h1>MPI Scaling</h1>
 <p><img data-src="img/dycore_speedup.svg" style="width:76.0%"
 alt="image" /></p>
 </section>
 
-<section id="takeaway" class="title-slide slide level1">
-<h1>Takeaway</h1>
-<p>The block implementation is the bridge between portable source and
-usable GPU geometry.</p>
+<section id="programming-model" class="title-slide slide level1">
+<h1>Programming Model</h1>
 <table>
 <colgroup>
-<col style="width: 26%" />
-<col style="width: 74%" />
+<col style="width: 20%" />
+<col style="width: 80%" />
 </colgroup>
 <tbody>
 <tr class="odd">
@@ -261,12 +285,12 @@ usable GPU geometry.</p>
 </tr>
 <tr class="odd">
 <td><strong>Blocks</strong></td>
-<td>Tune locality and concurrency without forking the solver</td>
+<td>Tune locality and concurrency to the target platform</td>
 </tr>
 <tr class="even">
 <td><strong>Validation</strong></td>
-<td>Preserve operational answers while adding accelerator
-performance</td>
+<td>Preserve CPU performance and reproducibility while supporting
+GPUs</td>
 </tr>
 </tbody>
 </table>
