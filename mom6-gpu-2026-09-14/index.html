@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="generator" content="pandoc">
+  <meta name="dcterms.date" content="2026-09-14">
+  <title>Block Loops in MOM6</title>
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, minimal-ui">
+  <link rel="stylesheet" href="./reveal.js/dist/reveal.css">
+  <style type="text/css">
+      code{white-space: pre-wrap;}
+      span.smallcaps{font-variant: small-caps;}
+      span.underline{text-decoration: underline;}
+      div.column{display: inline-block; vertical-align: top; width: 50%;}
+  </style>
+  <link rel="stylesheet" href="./reveal.js/css/theme/gfdl.css" id="theme">
+  <!-- Explicitly add zenburn for highlight support -->
+  <link rel="stylesheet" href="./reveal.js/plugin/highlight/zenburn.css" id="theme">
+  <!-- Printing and PDF exports -->
+  <script>
+    var link = document.createElement( 'link' );
+    link.rel = 'stylesheet';
+    link.type = 'text/css';
+    link.href = window.location.search.match( /print-pdf/gi ) ? './reveal.js/css/print/pdf.scss' : './reveal.js/css/print/paper.scss';
+    document.getElementsByTagName( 'head' )[0].appendChild( link );
+  </script>
+  <!--[if lt IE 9]>
+  <script src="./reveal.js/lib/js/html5shiv.js"></script>
+  <![endif]-->
+  <base href="./index.html">
+</head>
+<body>
+  <div class="reveal"
+       style="background: url(assets/bg_gfdl.jpg);
+              background-size: cover;">
+
+    <header style="width: 10vh; position: absolute; bottom: 2vh; right: 2vh;">
+      <!-- img src="img/noaa_logo.png" -->
+    </header>
+
+    <footer style="font-size: 1pc; position: absolute; bottom: 2%; left: 2%;">
+      <code><p><a
+href="https://marshallward.org/mom6-gpu-2026-09-14/">https://marshallward.org/mom6-gpu-2026-09-14/</a></p></code>
+    </footer>
+
+    <div class="slides">
+
+<section id="title-slide" class="deck-title">
+  <!--div class="reveal" style="text-align: right;">
+    <img src="img/noaa_logo.png"
+         style="background: none; border: none; box-shadow: none;
+         width: 30%"
+         alt="NCI">
+  </div-->
+  <div class="title-card">
+    <p class="title-kicker">MOM6 dev call</p>
+    <h1 class="title">Block Loops in MOM6</h1>
+  </div>
+  <object class="title-figure" type="image/svg+xml" data="img/block_loop_title.svg" aria-label="Animated block-loop iteration"></object>
+  <div class="title-meta">
+  </div>
+  <!-- Currently cannot add notes to a title slide, so have to do manually-->
+  <aside class="notes">
+    <p>Short presentation on the block implementation strategy used in
+    the MOM6 GPU port.</p>
+  </aside>
+</section>
+
+<section id="diverse-solvers" class="title-slide slide level1">
+<h1>Diverse Solvers</h1>
+<table>
+<colgroup>
+<col style="width: 34%" />
+<col style="width: 66%" />
+</colgroup>
+<tbody>
+<tr class="odd">
+<td><strong>Layered</strong></td>
+<td>Horizontal work over vertically stacked layers</td>
+</tr>
+<tr class="even">
+<td><strong>Columnar</strong></td>
+<td>Ordered vertical work over independent columns</td>
+</tr>
+<tr class="odd">
+<td><strong>Mixed</strong></td>
+<td>Layered phases, vertical sums, reductions, communication</td>
+</tr>
+</tbody>
+</table>
+<p>Different solvers require different strategies</p>
+</section>
+
+<section id="block-shapes" class="title-slide slide level1">
+<h1>Block Shapes</h1>
+<p><img data-src="img/block_shapes.svg" style="width:92.0%"
+alt="image" /></p>
+<ul>
+<li>CPUs favor data-resident solvers</li>
+<li>GPUs want large units of work</li>
+</ul>
+</section>
+
+<section id="why-blocking" class="title-slide slide level1">
+<h1>Why Blocking?</h1>
+<table>
+<colgroup>
+<col style="width: 40%" />
+<col style="width: 60%" />
+</colgroup>
+<tbody>
+<tr class="odd">
+<td><strong>Compiler view</strong></td>
+<td>Smaller, regular kernels are easier to map efficiently</td>
+</tr>
+<tr class="even">
+<td><strong>CPU view</strong></td>
+<td>Preserve locality and familiar <code>j-k-i</code> traversal where
+useful</td>
+</tr>
+<tr class="odd">
+<td><strong>GPU view</strong></td>
+<td>Expose larger horizontal work units without changing algorithms</td>
+</tr>
+<tr class="even">
+<td><strong>Model view</strong></td>
+<td>Keep solver control flow in ordinary Fortran</td>
+</tr>
+</tbody>
+</table>
+</section>
+
+<section id="representative-block-kernel"
+class="title-slide slide level1">
+<h1>Representative Block Kernel</h1>
+<pre class="fortran"><code>do jsb=js,je,njb ; do isb=is,ie,nib
+  ieb = min(isb + nib - 1, ie)
+  jeb = min(jsb + njb - 1, je)
+  iie = ieb - isb + 1
+  jje = jeb - jsb + 1
+
+  do concurrent (k=1:nz, jj=1:jje, ii=1:iie)
+    i = isb + ii - 1
+    j = jsb + jj - 1
+    visc_rem(ii,jj,k) = visc_rem_u(i,j,k)
+  enddo
+enddo ; enddo</code></pre>
+<p>Outer loops decompose the domain</p>
+<p>Inner loops define the kernel</p>
+</section>
+
+<section id="porting-model" class="title-slide slide level1">
+<h1>Porting Model</h1>
+<table>
+<colgroup>
+<col style="width: 26%" />
+<col style="width: 12%" />
+<col style="width: 62%" />
+</colgroup>
+<tbody>
+<tr class="odd">
+<td><strong>Kernels</strong></td>
+<td>-&gt;</td>
+<td>Fortran <code>do concurrent</code> expresses independent
+iterations</td>
+</tr>
+<tr class="even">
+<td><strong>Residency</strong></td>
+<td>-&gt;</td>
+<td>OpenMP keeps arrays and control structures on device</td>
+</tr>
+<tr class="odd">
+<td><strong>Ordering</strong></td>
+<td>-&gt;</td>
+<td>Vertical dependencies and reductions remain explicit</td>
+</tr>
+<tr class="even">
+<td><strong>Geometry</strong></td>
+<td>-&gt;</td>
+<td>Runtime blocks expose CPU- and GPU-suitable work units</td>
+</tr>
+</tbody>
+</table>
+</section>
+
+<section id="what-this-buys" class="title-slide slide level1">
+<h1>What This Buys</h1>
+<table>
+<colgroup>
+<col style="width: 28%" />
+<col style="width: 72%" />
+</colgroup>
+<tbody>
+<tr class="odd">
+<td><strong>Source control</strong></td>
+<td>Solver logic remains recognizable Fortran</td>
+</tr>
+<tr class="even">
+<td><strong>Data locality</strong></td>
+<td>Block-local arrays reduce global working set pressure</td>
+</tr>
+<tr class="odd">
+<td><strong>Concurrency</strong></td>
+<td>Horizontal work is exposed at a GPU-friendly granularity</td>
+</tr>
+<tr class="even">
+<td><strong>Tunability</strong></td>
+<td><code>nib</code> and <code>njb</code> can be chosen per build,
+platform, or solver</td>
+</tr>
+</tbody>
+</table>
+</section>
+
+<section id="data-residency" class="title-slide slide level1">
+<h1>Data Residency</h1>
+<p><code>do concurrent</code> defines computation, but not where data
+live.</p>
+<pre class="fortran"><code>!$omp target enter data map(to: CS)
+!$omp target enter data map(to: CS%u)
+!$omp target enter data map(to: CS%v)
+
+do concurrent (k=1:nk, j=1:nj, i=1:ni)
+  u(i,j,k) = u(i,j,k) + dt * du(i,j,k)
+enddo</code></pre>
+<p>Persistent fields and control structures stay device-resident across
+many kernels in a timestep.</p>
+</section>
+
+<section id="preserving-answers" class="title-slide slide level1">
+<h1>Preserving Answers</h1>
+<p>GPU execution must respect MOM6 regression practice.</p>
+<table>
+<colgroup>
+<col style="width: 36%" />
+<col style="width: 64%" />
+</colgroup>
+<tbody>
+<tr class="odd">
+<td><strong>Ordered vertical work</strong></td>
+<td>Keep <code>k</code> loops serial where the algorithm requires
+it</td>
+</tr>
+<tr class="even">
+<td><strong>Reductions</strong></td>
+<td>Use reproducible accumulation patterns</td>
+</tr>
+<tr class="odd">
+<td><strong>Floating point</strong></td>
+<td>Disable transformations such as unwanted FMA contraction when
+needed</td>
+</tr>
+<tr class="even">
+<td><strong>CPU path</strong></td>
+<td>GPU-enabled source must not regress CPU performance</td>
+</tr>
+</tbody>
+</table>
+</section>
+
+<section id="performance-picture" class="title-slide slide level1">
+<h1>Performance Picture</h1>
+<p><img data-src="img/dycore_and_main.svg" style="width:84.0%"
+alt="image" /></p>
+<p>The GPU wins once enough horizontal work is exposed, but module
+speedups vary by dependency structure, temporary storage, reductions,
+and communication.</p>
+</section>
+
+<section id="module-variation" class="title-slide slide level1">
+<h1>Module Variation</h1>
+<p><img data-src="img/module_scaling.svg" style="width:92.0%"
+alt="image" /></p>
+<p>The block strategy exposes several solver shapes, but the realized
+speedup still depends on each module's memory access, ordering, and
+temporary storage.</p>
+</section>
+
+<section id="scaling-picture" class="title-slide slide level1">
+<h1>Scaling Picture</h1>
+<p><img data-src="img/dycore_speedup.svg" style="width:76.0%"
+alt="image" /></p>
+<p>The same data-resident implementation extends across MPI ranks, with
+scaling limited by fixed local work and the available GPU communication
+path.</p>
+</section>
+
+<section id="takeaway" class="title-slide slide level1">
+<h1>Takeaway</h1>
+<p>The block implementation is the bridge between portable source and
+usable GPU geometry.</p>
+<table>
+<colgroup>
+<col style="width: 26%" />
+<col style="width: 74%" />
+</colgroup>
+<tbody>
+<tr class="odd">
+<td><strong>Fortran</strong></td>
+<td>Express independent work with <code>do concurrent</code></td>
+</tr>
+<tr class="even">
+<td><strong>OpenMP</strong></td>
+<td>Manage data lifetime and movement explicitly</td>
+</tr>
+<tr class="odd">
+<td><strong>Blocks</strong></td>
+<td>Tune locality and concurrency without forking the solver</td>
+</tr>
+<tr class="even">
+<td><strong>Validation</strong></td>
+<td>Preserve operational answers while adding accelerator
+performance</td>
+</tr>
+</tbody>
+</table>
+</section>
+    </div>
+  </div>
+
+  <script src="./reveal.js/dist/reveal.js"></script>
+  <script src="./reveal.js/plugin/math/math.js"></script>
+  <script src="./reveal.js/plugin/notes/notes.js"></script>
+  <script src="./reveal.js/plugin/highlight/highlight.js"></script>
+
+  <script>
+
+      // Full list of configuration options available at:
+      // https://github.com/hakimel/reveal.js#configuration
+      Reveal.initialize({
+        // Display controls in the bottom right corner
+        controls: true,
+        // Display a presentation progress bar
+        progress: true,
+        // Display the page number of the current slide
+        slideNumber: true,
+        // Push each slide change to the browser history
+        history: true,
+        // Enable keyboard shortcuts for navigation
+        keyboard: true,
+        // Enable the slide overview mode
+        overview: true,
+        // Vertical centering of slides
+        center: true,
+        // Enables touch navigation on devices with touch input
+        touch: true,
+        // Turns fragments on and off globally
+        fragments: true,
+        // Flags if we should show a help overlay when the questionmark
+        // key is pressed
+        help: true,
+        // Number of milliseconds between automatically proceeding to the
+        // next slide, disabled when set to 0, this value can be overwritten
+        // by using a data-autoslide attribute on your slides
+        autoSlide: 0,
+        // Stop auto-sliding after user input
+        autoSlideStoppable: true,
+        // Transition style
+        transition: 'slide', // none/fade/slide/convex/concave/zoom
+        // Transition speed
+        transitionSpeed: 'default', // default/fast/slow
+        // Transition style for full page slide backgrounds
+        backgroundTransition: 'fade', // none/fade/slide/convex/concave/zoom
+        // Number of slides away from the current that are visible
+        viewDistance: 3,
+        math: {
+          //mathjax: '/usr/share/javascript/mathjax/MathJax.js',
+          mathjax: 'https://cdn.jsdelivr.net/gh/mathjax/mathjax@2.7.9/MathJax.js',
+          config: 'TeX-AMS_HTML-full',
+          "HTML-CSS": {
+              preferredFont: "Neo-Euler",
+              //preferredFont: "Asana-Math",
+          },
+          //TeX: {
+          //  inlineMath: [['\\(','\\)']],
+          //  displayMath: [['\\[','\\]']],
+          //  balanceBraces: true,
+          //  processEscapes: false,
+          //  processRefs: true,
+          //  processEnvironments: true,
+          //  preview: 'TeX',
+          //  skipTags: ['script','noscript','style','textarea','pre','code'],
+          //  ignoreClass: 'tex2jax_ignore',
+          //  processClass: 'tex2jax_process'
+          //},
+        },
+
+        // Optional reveal.js plugins
+        dependencies: [
+          { src: './reveal.js/lib/js/classList.js', condition: function() { return !document.body.classList; } },
+          { src: './reveal.js/plugin/zoom/zoom.js', async: true },
+          { src: './reveal.js/plugin/notes/notes.js', async: true }
+        ],
+        plugins : [ RevealMath, RevealNotes, RevealHighlight],
+        pdfMaxPagesPerSlide: 1,
+      });
+    </script>
+    </body>
+</html>

@@ -1,0 +1,145 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 420" role="img" aria-labelledby="title desc">
+  <title id="title">Animated 32 by 32 block loop</title>
+  <desc id="desc">A highlighted point scans through a 32 by 32 grid in 8 by 4 blocks.</desc>
+  <defs>
+    <filter id="glow" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <linearGradient id="blockFill" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#42affa" stop-opacity="0.18"/>
+      <stop offset="1" stop-color="#f3a626" stop-opacity="0.12"/>
+    </linearGradient>
+  </defs>
+  <style>
+    .frame { fill: none; stroke: rgba(255,255,255,0.35); stroke-width: 1.4; }
+    .grid-line { stroke: rgba(255,255,255,0.13); stroke-width: 0.55; shape-rendering: crispEdges; }
+    .cell { fill: rgba(255,255,255,0.06); }
+    .visited { fill: rgba(66,175,250,0.26); }
+    .active { fill: #f3a626; filter: url(#glow); }
+    .block-fill { fill: url(#blockFill); }
+    .block-stroke { fill: none; stroke: #42affa; stroke-width: 2.4; stroke-linejoin: round; }
+    .label { fill: rgba(255,255,255,0.82); font: 600 17px Source Sans Pro, Liberation Sans, Arial, sans-serif; }
+    .small { fill: rgba(255,255,255,0.64); font: 13px Source Sans Pro, Liberation Sans, Arial, sans-serif; }
+    .code { fill: #d6f0ff; font: 15px ui-monospace, SFMono-Regular, Menlo, Consolas, Liberation Mono, monospace; }
+    .accent { fill: #f3a626; }
+  </style>
+  <g transform="translate(40 34)">
+    <text class="label" x="0" y="-12">runtime block decomposition</text>
+    <rect class="frame" x="0" y="0" width="320" height="320" rx="4"/>
+    <g id="cells"></g>
+    <g id="grid"></g>
+    <rect id="blockFillRect" class="block-fill" x="0" y="0" width="80" height="40" rx="2"/>
+    <rect id="blockRect" class="block-stroke" x="0" y="0" width="80" height="40" rx="2"/>
+    <rect id="activeCell" class="active" x="1.5" y="1.5" width="7" height="7" rx="1.5"/>
+  </g>
+
+  <g transform="translate(386 96)">
+    <text class="small" x="0" y="0">block size</text>
+    <text class="label" x="0" y="25"><tspan class="accent">8</tspan> x <tspan class="accent">4</tspan></text>
+    <text class="small" x="0" y="68">outer loops</text>
+    <text class="code" x="0" y="91">jsb, isb</text>
+    <text class="small" x="0" y="134">inner kernel</text>
+    <text class="code" x="0" y="157">do concurrent</text>
+    <text class="code" x="0" y="179">  (k,jj,ii)</text>
+  </g>
+
+  <script><![CDATA[
+    const n = 32;
+    const blockI = 8;
+    const blockJ = 4;
+    const cell = 10.0;
+    const pad = 1.5;
+    const frameMs = 48;
+    const holdFrames = 10;
+    const cells = document.getElementById('cells');
+    const grid = document.getElementById('grid');
+    const active = document.getElementById('activeCell');
+    const blockRect = document.getElementById('blockRect');
+    const blockFill = document.getElementById('blockFillRect');
+    const visited = [];
+
+    for (let j = 0; j < n; j++) {
+      visited[j] = [];
+      for (let i = 0; i < n; i++) {
+        const r = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        r.setAttribute('class', 'cell');
+        r.setAttribute('x', i * cell + pad);
+        r.setAttribute('y', j * cell + pad);
+        r.setAttribute('width', cell - 2 * pad);
+        r.setAttribute('height', cell - 2 * pad);
+        r.setAttribute('rx', 1.2);
+        cells.appendChild(r);
+        visited[j][i] = r;
+      }
+    }
+
+    for (let q = 1; q < n; q++) {
+      const v = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      v.setAttribute('class', 'grid-line');
+      v.setAttribute('x1', q * cell);
+      v.setAttribute('x2', q * cell);
+      v.setAttribute('y1', 0);
+      v.setAttribute('y2', n * cell);
+      grid.appendChild(v);
+
+      const h = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      h.setAttribute('class', 'grid-line');
+      h.setAttribute('x1', 0);
+      h.setAttribute('x2', n * cell);
+      h.setAttribute('y1', q * cell);
+      h.setAttribute('y2', q * cell);
+      grid.appendChild(h);
+    }
+
+    let step = 0;
+    const stepsPerBlock = blockI * blockJ;
+    const blocksPerRow = n / blockI;
+    const blockRows = n / blockJ;
+    const totalSteps = n * n + holdFrames;
+
+    function clearVisited() {
+      for (let j = 0; j < n; j++) {
+        for (let i = 0; i < n; i++) visited[j][i].classList.remove('visited');
+      }
+    }
+
+    function draw() {
+      if (step >= n * n) {
+        step++;
+        if (step >= totalSteps) {
+          clearVisited();
+          step = 0;
+        }
+        return;
+      }
+
+      const blockIndex = Math.floor(step / stepsPerBlock);
+      const local = step % stepsPerBlock;
+      const blockCol = blockIndex % blocksPerRow;
+      const blockRow = Math.floor(blockIndex / blocksPerRow) % blockRows;
+      const ii = local % blockI;
+      const jj = Math.floor(local / blockI);
+      const i = blockCol * blockI + ii;
+      const j = blockRow * blockJ + jj;
+      const bx = blockCol * blockI * cell;
+      const by = blockRow * blockJ * cell;
+
+      blockRect.setAttribute('x', bx);
+      blockRect.setAttribute('y', by);
+      blockFill.setAttribute('x', bx);
+      blockFill.setAttribute('y', by);
+      active.setAttribute('x', i * cell + pad);
+      active.setAttribute('y', j * cell + pad);
+      visited[j][i].classList.add('visited');
+      step++;
+    }
+
+    draw();
+    setInterval(draw, frameMs);
+  ]]></script>
+</svg>
