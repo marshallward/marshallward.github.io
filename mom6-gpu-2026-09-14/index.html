@@ -107,8 +107,14 @@ alt="image" /></p>
 <object type="image/svg+xml" data="img/block_loop_title.svg" style="width: 68%; height: 48vh; border: 0;" aria-label="Animated block-loop traversal"></object>
 </section>
 
-<section id="why-blocking" class="title-slide slide level1">
-<h1>Why Blocking?</h1>
+<section>
+<section id="block-performance" class="title-slide slide level1">
+<h1>Block Performance</h1>
+<p><img data-src="assets/corad_blocks.svg" alt="image" /></p>
+<p>Optimize GPU while preserving CPU performance</p>
+</section>
+<section id="why-blocking" class="slide level2">
+<h2>Why Blocking?</h2>
 <table>
 <colgroup>
 <col style="width: 40%" />
@@ -134,8 +140,7 @@ useful</td>
 </tr>
 </tbody>
 </table>
-</section>
-
+</section></section>
 <section id="representative-block-kernel"
 class="title-slide slide level1">
 <h1>Representative Block Kernel</h1>
@@ -213,52 +218,6 @@ iterations</td>
 <td><strong>Tunability</strong></td>
 <td><code>nib</code> and <code>njb</code> can be chosen per build,
 platform, or solver</td>
-</tr>
-</tbody>
-</table>
-</section>
-
-<section id="data-residency" class="title-slide slide level1">
-<h1>Data Residency</h1>
-<p><code>do concurrent</code> defines computation, but not where data
-live.</p>
-<pre class="fortran"><code>!$omp target enter data map(to: CS)
-!$omp target enter data map(to: CS%u)
-!$omp target enter data map(to: CS%v)
-
-do concurrent (k=1:nk, j=1:nj, i=1:ni)
-  u(i,j,k) = u(i,j,k) + dt * du(i,j,k)
-enddo</code></pre>
-<p>Persistent fields and control structures stay device-resident across
-many kernels in a timestep.</p>
-</section>
-
-<section id="preserving-answers" class="title-slide slide level1">
-<h1>Preserving Answers</h1>
-<p>GPU execution must respect MOM6 regression practice.</p>
-<table>
-<colgroup>
-<col style="width: 36%" />
-<col style="width: 64%" />
-</colgroup>
-<tbody>
-<tr class="odd">
-<td><strong>Ordered vertical work</strong></td>
-<td>Keep <code>k</code> loops serial where the algorithm requires
-it</td>
-</tr>
-<tr class="even">
-<td><strong>Reductions</strong></td>
-<td>Use reproducible accumulation patterns</td>
-</tr>
-<tr class="odd">
-<td><strong>Floating point</strong></td>
-<td>Disable transformations such as unwanted FMA contraction when
-needed</td>
-</tr>
-<tr class="even">
-<td><strong>CPU path</strong></td>
-<td>GPU-enabled source must not regress CPU performance</td>
 </tr>
 </tbody>
 </table>
