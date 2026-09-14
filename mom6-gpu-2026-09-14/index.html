@@ -33,7 +33,7 @@
 </head>
 <body>
   <div class="reveal"
-       style="background: url(assets/bg_gfdl.jpg);
+       style="background: url(assets/3px-tile.png);
               background-size: cover;">
 
     <header style="width: 10vh; position: absolute; bottom: 2vh; right: 2vh;">
@@ -58,7 +58,6 @@ href="https://marshallward.org/mom6-gpu-2026-09-14/">https://marshallward.org/mo
     <p class="title-kicker">MOM6 dev call</p>
     <h1 class="title">Block Loops in MOM6</h1>
   </div>
-  <object class="title-figure" type="image/svg+xml" data="img/block_loop_title.svg" aria-label="Animated block-loop iteration"></object>
   <div class="title-meta">
   </div>
   <!-- Currently cannot add notes to a title slide, so have to do manually-->
@@ -101,6 +100,11 @@ alt="image" /></p>
 <li>CPUs favor data-resident solvers</li>
 <li>GPUs want large units of work</li>
 </ul>
+</section>
+
+<section id="block-traversal" class="title-slide slide level1">
+<h1>Block Traversal</h1>
+<object type="image/svg+xml" data="img/block_loop_title.svg" style="width: 68%; height: 48vh; border: 0;" aria-label="Animated block-loop traversal"></object>
 </section>
 
 <section id="why-blocking" class="title-slide slide level1">
@@ -276,9 +280,6 @@ alt="image" /></p>
 <h1>Scaling Picture</h1>
 <p><img data-src="img/dycore_speedup.svg" style="width:76.0%"
 alt="image" /></p>
-<p>The same data-resident implementation extends across MPI ranks, with
-scaling limited by fixed local work and the available GPU communication
-path.</p>
 </section>
 
 <section id="takeaway" class="title-slide slide level1">
