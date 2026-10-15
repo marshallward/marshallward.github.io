@@ -1,0 +1,712 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="generator" content="pandoc">
+  <title>Performance-portable MOM6 on GPUs</title>
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, minimal-ui">
+  <link rel="stylesheet" href="./reveal.js/dist/reveal.css">
+  <style type="text/css">
+      code{white-space: pre-wrap;}
+      span.smallcaps{font-variant: small-caps;}
+      span.underline{text-decoration: underline;}
+      div.column{display: inline-block; vertical-align: top; width: 50%;}
+  </style>
+  <link rel="stylesheet" href="./reveal.js/css/theme/gfdl.css" id="theme">
+  <link rel="stylesheet" href="./reveal.js/plugin/highlight/zenburn.css">
+  <base href="./index.html">
+</head>
+<body>
+  <div class="reveal"
+       style="background: url(img/bg_gfdl.jpg);
+              background-size: cover;">
+
+    <header style="width: 10vh; position: absolute; bottom: 2vh; right: 2vh;">
+      <!-- img src="img/noaa_logo.png" -->
+    </header>
+
+
+    <div class="slides">
+
+<section id="title-slide" class="deck-title">
+  <!--div class="reveal" style="text-align: right;">
+    <img src="img/noaa_logo.png"
+         style="background: none; border: none; box-shadow: none;
+         width: 30%"
+         alt="NCI">
+  </div-->
+  <div class="title-card">
+    <p class="title-kicker"><p>WACCPD 2026</p></p>
+    <h1 class="title">Performance-portable MOM6 on GPUs</h1>
+    <p class="subtitle"><p>Standard Fortran and OpenMP</p></p>
+  </div>
+  <div class="title-meta">
+    <div class="author"><ul>
+<li>Marshall Ward</li>
+<li>Edward Yang</li>
+<li>Jorge Gálvez Vallejo</li>
+<li>Utheri Wagura</li>
+</ul></div>
+  </div>
+  <!-- Currently cannot add notes to a title slide, so have to do manually-->
+  <aside class="notes">
+    <p>[0:00–0:30] Our question is whether a long-lived community ocean
+    model can gain GPU acceleration without a separate implementation or
+    changes to its validated answers. We use standard Fortran to express
+    the parallel work and OpenMP to keep its data on the device. This
+    talk focuses on the dynamic core, not a completed port of the entire
+    production model.</p>
+  </aside>
+</section>
+
+<section id="acceleration-without-disruption"
+class="title-slide slide level1">
+<h1>Acceleration without disruption</h1>
+<p>MOM6 is a community and operational ocean model.</p>
+<table>
+<colgroup>
+<col style="width: 28%" />
+<col style="width: 72%" />
+</colgroup>
+<tbody>
+<tr class="odd">
+<td><strong>Preserve</strong></td>
+<td>One Fortran codebase for CPU and GPU</td>
+</tr>
+<tr class="even">
+<td><strong>Verify</strong></td>
+<td>Retain validated, bitwise-identical answers</td>
+</tr>
+<tr class="odd">
+<td><strong>Perform</strong></td>
+<td>Gain GPU speed without losing CPU performance</td>
+</tr>
+</tbody>
+</table>
+<p>Port the model, not just an isolated kernel.</p>
+<aside class="container notes">
+<p>[0:30–1:30] MOM6 supports ongoing scientific research and operational
+applications. A replacement GPU implementation would create a second
+code to maintain and validate. Changing answers is also disruptive: we
+need to distinguish scientific changes from porting errors. CPU
+execution remains important, so a successful port must preserve that
+path and its performance. The approach is deliberately incremental,
+retaining the model's development practices rather than introducing a
+new language or framework.</p>
+</aside>
+</section>
+
+<section id="different-solvers-different-dependencies"
+class="title-slide slide level1">
+<h1>Different solvers, different dependencies</h1>
+<table>
+<colgroup>
+<col style="width: 22%" />
+<col style="width: 40%" />
+<col style="width: 38%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Structure</th>
+<th>Examples</th>
+<th>Mapping constraint</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><strong>Layered</strong></td>
+<td>Advection, horizontal viscosity</td>
+<td>Horizontal work over layers</td>
+</tr>
+<tr class="even">
+<td><strong>Columnar</strong></td>
+<td>Vertical friction</td>
+<td>Independent columns; ordered vertical work</td>
+</tr>
+<tr class="odd">
+<td><strong>Mixed</strong></td>
+<td>Pressure, continuity, barotropic</td>
+<td>Stencils, sums, and coupling</td>
+</tr>
+</tbody>
+</table>
+<p>No universal loop shape fits the dynamic core.</p>
+<aside class="container notes">
+<p>[1:30–2:30] The dynamic core advances velocities and layer
+thicknesses. We classify its computations by dependency, not by the
+physical equation. Layered work offers horizontal concurrency and
+sometimes concurrency across layers. A column solve has horizontal
+independence but ordered work down each column. Mixed solvers combine
+these patterns: pressure depends on overlying layers, and the barotropic
+mode couples a two-dimensional solve to vertically integrated state.
+This taxonomy tells us how to expose work; later we will see why it does
+not predict speedup by itself.</p>
+</aside>
+</section>
+
+<section id="fortran-describes-independent-work"
+class="title-slide slide level1">
+<h1>Fortran describes independent work</h1>
+<pre class="fortran"><code>do concurrent (k=1:nk, j=1:nj, i=1:ni)
+  a(i,j,k) = b(i,j,k) + c(i,j,k)
+enddo</code></pre>
+<p><strong>Source:</strong> iteration independence</p>
+<p><strong>Compiler:</strong> CPU execution or GPU kernel mapping</p>
+<p><strong>OpenMP:</strong> device-data residency</p>
+<p><code>do concurrent</code> does not itself require GPU execution.</p>
+<aside class="container notes">
+<p>[2:30–3:30] The loop is standard Fortran, not a GPU-specific
+directive. It states that these iterations may execute in any order. The
+compiler and build configuration decide how to execute them. NVIDIA maps
+these loops through its OpenACC machinery; other vendors have their own
+implementations. The source expresses the algorithmic independence while
+the compiler chooses launch details. But this is not a complete
+accelerator programming model: Fortran does not prescribe host-device
+transfers, and procedure calls and temporary storage still affect
+whether a useful kernel can be generated.</p>
+</aside>
+</section>
+
+<section id="keep-the-data-on-the-device"
+class="title-slide slide level1">
+<h1>Keep the data on the device</h1>
+<pre class="fortran"><code>! Establish residency
+!$omp target enter data map(alloc: a) map(to: b, c)
+
+do concurrent (k=1:nk, j=1:nj, i=1:ni)
+  a(i,j,k) = b(i,j,k) + c(i,j,k)
+enddo
+
+! Return the result when needed
+!$omp target exit data map(from: a) map(delete: b, c)</code></pre>
+<p>In MOM6, persistent fields stay resident <strong>across
+kernels</strong>.</p>
+<aside class="container notes">
+<p>[3:30–4:30] This is a compact illustration of the data lifecycle, not
+a prescription to copy fields around every kernel. Real model timesteps
+contain thousands of kernels, so those transfers would be devastating.
+Persistent fields are mapped during initialization and retained on the
+GPU. Modules manage their own temporary storage. OpenMP-managed arrays
+must be visible to kernels generated from do concurrent:
+interoperability is an explicit toolchain requirement. Derived types
+require care as well: mapping the object and its array components is one
+coordinated lifetime problem.</p>
+</aside>
+</section>
+
+<section id="parallel-horizontally-ordered-vertically"
+class="title-slide slide level1">
+<h1>Parallel horizontally, ordered vertically</h1>
+<pre class="fortran"><code>do concurrent (j=js:je)
+  do k=1,nz
+    do concurrent (i=is-1:ie)
+      uhbt(i,j) = uhbt(i,j) + uh0(i,j,k)
+    enddo
+  enddo
+enddo</code></pre>
+<ul>
+<li>Independent horizontal columns</li>
+<li>Ordered vertical accumulation</li>
+<li>CPU-friendly <code>j-k-i</code> traversal</li>
+</ul>
+<aside class="container notes">
+<p>[4:30–5:30] Flattening everything into one concurrent loop would be
+wrong here. Each horizontal column is independent, but its sum must
+follow the validated vertical order. Nested concurrency expresses that
+distinction without discarding the contiguous i-loop important to CPU
+execution. For this pattern NVIDIA can produce 32 by 4 thread blocks in
+the horizontal plane while keeping the k accumulation serial. That
+geometry is a compiler implementation detail, not a promise of the
+Fortran standard. Source loop hierarchy is both a correctness decision
+and a performance decision.</p>
+</aside>
+</section>
+
+<section id="blocking-reconciles-cpu-and-gpu"
+class="title-slide slide level1">
+<h1>Blocking reconciles CPU and GPU</h1>
+<p><img data-src="img/block_shapes.svg" style="width:90.0%"
+alt="Layer-oriented, column-oriented, and GPU-oriented computational blocks." /></p>
+<p>CPU: retain locality. GPU: expose larger work units.</p>
+<p>Runtime block extents — same solver, same module API.</p>
+<aside class="container notes">
+<p>[5:30–6:30] Nested loops alone do not solve every mapping problem.
+Larger solvers contain multiple phases and helper calls that can obscure
+the useful parallel structure. Explicit computational blocks keep
+ordinary control flow outside compact kernels and bound temporary
+storage. The same source can use smaller or anisotropic blocks for CPU
+locality and larger horizontal blocks for GPU concurrency. These are
+algorithmic tiles, not necessarily CUDA thread blocks. The key is to
+make execution geometry a configuration choice rather than maintain
+separate solver implementations. Wrappers retain the existing module
+API, so callers such as RK2 do not need to know about the decomposition.
+Ordinary Fortran controls traversal; the inner kernel only sees regular,
+block-local work.</p>
+</aside>
+</section>
+
+<section id="traverse-blocks-launch-local-kernels"
+class="title-slide slide level1">
+<h1>Traverse blocks, launch local kernels</h1>
+<object type="image/svg+xml" data="img/block_loop_title.svg"
+  style="width: 570px; height: 460px; border: 0;"
+  aria-label="Animated traversal of a 32 by 32 domain in 8 by 4 tiles">
+  <img src="img/block_shapes.svg" alt="Computational block shapes">
+</object>
+<p>Outer loops select a tile; <code>do concurrent</code> expresses its
+independent work.</p>
+<aside class="container notes">
+<p>[6:30–7:00] The animation makes the two levels concrete. Ordinary
+outer loops choose an 8 by 4 tile in this illustrative 32 by 32 domain.
+Within each tile we reconstruct global indices from block-local indices
+and run compact kernels. The moving point illustrates index coverage,
+not serial GPU execution: do concurrent iterations need not follow this
+scan order. This is computational tiling, not a prescribed GPU
+thread-block shape. Do not wait for the entire animation cycle.</p>
+</aside>
+</section>
+
+<section id="blocking-changes-the-gpu-outcome"
+class="title-slide slide level1">
+<h1>Blocking changes the GPU outcome</h1>
+<p><img data-src="img/corad_blocks.svg" height="440"
+alt="Coriolis and momentum-advection timings with and without blocking; CPU curves overlap while GPU blocking reduces time." /></p>
+<p>CPU curves nearly overlap; GPU time drops with blocking.</p>
+<aside class="container notes">
+<p>[7:00–7:45] This earlier development comparison isolates the effect
+of blocking in Coriolis and momentum advection. The blue and orange CPU
+curves nearly overlap. The green GPU curve without blocking is much
+higher than the red blocked curve. That is the practical motivation:
+expose enough useful work to the device without penalizing the CPU path.
+The vertical axis is module time per step in milliseconds, not speedup;
+the horizontal axis is area relative to the older 32 by 32 base domain.
+This plot comes from the September developer talk, not the manuscript's
+GH200 sweep. Do not combine its timings or infer identical hardware,
+compiler settings, or statistical definitions without checking the
+original experiment. Use it as the qualitative before/after
+illustration; the following paper results establish the current measured
+performance.</p>
+</aside>
+</section>
+
+<section id="preserve-answers-and-cpu-performance"
+class="title-slide slide level1">
+<h1>Preserve answers and CPU performance</h1>
+<p><strong>Bitwise validation:</strong> NVIDIA CPU and GPU builds match
+in three tested configurations.</p>
+<ul>
+<li>Preserve vertical ordering and reproducible reductions</li>
+<li>Restrict floating-point transformations where required</li>
+</ul>
+<table>
+<caption>CPU regression check: 384 × 256 × 100</caption>
+<colgroup>
+<col style="width: 60%" />
+<col style="width: 40%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Codebase</th>
+<th>Mean time/step</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Production baseline</td>
+<td>76.51 ms</td>
+</tr>
+<tr class="even">
+<td>GPU-enabled, on CPU</td>
+<td>74.89 ms</td>
+</tr>
+</tbody>
+</table>
+<p>Ten runs each: no regression in this test; mean time <strong>2.1%
+lower</strong>.</p>
+<aside class="container notes">
+<p>[7:45–8:45] Bitwise matching is scoped to the tested configurations,
+toolchain, hardware, flags, and run lengths. It is not a claim of
+universal agreement across vendors or optimization settings. The double
+gyre validates the measured dynamic core; two production-style
+configurations broaden coverage but are still partial ports. GPU builds
+use NVIDIA HPC SDK 26.3, with selected transformations disabled,
+including FMA contraction. The separate CPU regression experiment
+compares the two codebases on identical hardware, compiler, flags, and
+resource layout. Ten repetitions each show no regression at this
+representative size. Standard deviations were 0.075 and 0.064 ms
+respectively. Do not generalize this one-case result to every
+configuration or confuse it with the cross-hardware performance
+comparison.</p>
+</aside>
+</section>
+
+<section id="benchmark-the-double-gyre"
+class="title-slide slide level1">
+<h1>Benchmark: the double gyre</h1>
+<table>
+<colgroup>
+<col style="width: 32%" />
+<col style="width: 68%" />
+</colgroup>
+<tbody>
+<tr class="odd">
+<td><img data-src="img/gyre.png" style="width:90.0%"
+alt="Idealized double-gyre ocean circulation." /></td>
+<td><ul>
+<li>Dynamic-core-focused configuration</li>
+<li>64 × 64 to 1024 × 1024; 100 levels</li>
+<li>One 96-core EPYC 9654 socket vs one GH200 GPU</li>
+<li>Wall-clock time per completed model step</li>
+</ul></td>
+</tr>
+</tbody>
+</table>
+<p>Fixed resources, increasing problem size — <strong>not weak
+scaling</strong>.</p>
+<aside class="container notes">
+<p>[8:45–9:30] The double gyre is an idealized wind-driven basin whose
+cost is dominated by the dynamic core. The comparison uses natural
+resource units, one CPU socket and one GPU, rather than an ambiguous
+node comparison. CPU performance uses Intel oneAPI 25.2 and
+reproducibility-oriented flags; GPU performance uses NVIDIA HPC SDK
+26.3. This is not the same compiler comparison used for bitwise
+validation. We report wall-clock time per completed step because the
+model timestep varies with resolution. The plot uses horizontal area
+relative to 64 by 64: 256 times the area is 1024 by 1024, and every case
+has 100 vertical levels.</p>
+</aside>
+</section>
+
+<section id="nearly-3-with-enough-work"
+class="title-slide slide level1">
+<h1>Nearly 3× with enough work</h1>
+<p><img data-src="img/dycore_and_main.svg" height="465"
+alt="CPU and GH200 main-loop times and GPU speedup over increasing horizontal domain size." /></p>
+<p>Small domains favor CPU; larger domains amortize GPU overhead.</p>
+<aside class="container notes">
+<p>[9:30–10:45] The top panel shows time per step; the bottom shows CPU
+time divided by GPU time. Small cases provide insufficient work to keep
+the GPU occupied and amortize fixed launch costs. As the horizontal
+domain grows, the GPU overtakes the CPU and approaches three times the
+performance at the largest size. The dotted vertical line marks the
+representative 384 by 256 by 100 production layout. This is a main-loop
+result for a dynamic-core-focused benchmark, not a claim about the
+throughput of a full coupled climate model. It is also less than a pure
+memory-bandwidth ratio might suggest; the integrated solver includes
+ordered work, temporaries, reductions, communication, and compiler
+overheads.</p>
+</aside>
+</section>
+
+<section id="structure-guides-porting-not-speedup"
+class="title-slide slide level1">
+<h1>Structure guides porting, not speedup</h1>
+<p><img data-src="img/module_scaling.svg" height="440"
+alt="CPU and GPU timings for six dynamic-core modules across problem sizes." /></p>
+<p>Largest-domain speedups: viscosity ~1.2×; pressure/barotropic
+~7.4–7.5×.</p>
+<aside class="container notes">
+<p>[10:45–12:00] Do not walk through every panel. Contrast horizontal
+viscosity, a seemingly favorable layered solver with only about 1.2
+times speedup, with the mixed pressure and barotropic components
+reaching about 7.4 and 7.5 times. Vertical friction retains serial
+column work yet reaches about twice CPU performance. Advection reaches
+about 1.8 times and continuity about 2.4 times. The dependency taxonomy
+is useful for deciding which loops may be concurrent and which must
+remain ordered, but realized performance also depends on memory access,
+private storage, launch counts, reductions, and the compiler. Integrated
+speedup is determined by the remaining costs, not an average of these
+module speedups. The figure is regenerated from the manuscript logs; its
+range title now matches the plotted sweep and the 64 by 64 reference
+grid.</p>
+</aside>
+</section>
+
+<section id="the-resident-model-extends-across-gpus"
+class="title-slide slide level1">
+<h1>The resident model extends across GPUs</h1>
+<p><img data-src="img/dycore_speedup.svg" height="450"
+alt="Fixed-domain speedup versus H100 GPU count for 256 by 256, 512 by 512, and 1024 by 1024 domains, with an ideal-scaling reference." /></p>
+<p>Up to <strong>6.1× on 10 H100s</strong>, relative to one H100.</p>
+<aside class="container notes">
+<p>[12:00–13:15] This reproduces the manuscript's fixed-domain
+strong-scaling view using H100s rather than the GH200 of the
+single-device comparison. The horizontal axis is GPU count; each curve
+fixes the global domain. Speedup is relative to one H100 for that same
+domain. The dashed line denotes ideal scaling. Two GPUs per node, up to
+five nodes. FMS packs and unpacks resident halo buffers on the GPU and
+passes device pointers to GPU-aware MPI. The largest domain reaches
+about 6.1 times speedup at ten GPUs; the smallest reaches only about 1.4
+times as local work shrinks and communication dominates. Importantly,
+GPU-aware MPI does not imply a direct GPU transport: this system lacks
+NVLink and GPUDirect RDMA, and communication is staged through host
+memory and PCIe over NDR-200 InfiniBand. The result demonstrates the
+distributed data-resident implementation, not ideal scaling or a
+hardware-independent communication limit. Rank/device selection uses an
+OpenACC runtime call in the NVIDIA implementation.</p>
+</aside>
+</section>
+
+<section id="standards-based-not-limitation-free"
+class="title-slide slide level1">
+<h1>Standards-based, not limitation-free</h1>
+<table>
+<colgroup>
+<col style="width: 32%" />
+<col style="width: 68%" />
+</colgroup>
+<tbody>
+<tr class="odd">
+<td><strong>Private work arrays</strong></td>
+<td>OpenMP target-loop fallback for column solvers</td>
+</tr>
+<tr class="even">
+<td><strong>Procedure calls</strong></td>
+<td>Inlining and register pressure matter</td>
+</tr>
+<tr class="odd">
+<td><strong>Objects / descriptors</strong></td>
+<td>Host-side dispatch; careful component lifetimes</td>
+</tr>
+<tr class="even">
+<td><strong>Runtime control</strong></td>
+<td>NVIDIA device selection uses OpenACC; async is outside Fortran</td>
+</tr>
+</tbody>
+</table>
+<p>Portable source does not yet mean validated performance on every
+vendor.</p>
+<aside class="container notes">
+<p>[13:15–14:00] The approach is pragmatic: do concurrent is the primary
+notation, but current compiler limitations require fallbacks. Vertical
+friction uses OpenMP where private local arrays are not reliably
+supported. Some procedures were manually inlined for this compiler
+release. Objects remain useful on the host, but device kernels prefer
+statically resolved calls and explicit array state. Asynchronous
+execution is a future opportunity, not a measured feature here. Our
+portability claim is about a standards-based single source strategy;
+these GPU measurements are NVIDIA results, not a completed cross-vendor
+performance evaluation.</p>
+</aside>
+</section>
+
+<section>
+<section id="one-codebase-solver-aware-acceleration"
+class="title-slide slide level1">
+<h1>One codebase, solver-aware acceleration</h1>
+<p><strong>Express</strong> independence with standard Fortran.</p>
+<p><strong>Manage</strong> residency and communication explicitly.</p>
+<p><strong>Preserve</strong> ordering, validated answers, and the CPU
+path.</p>
+<p>Nearly <strong>3×</strong> single-GPU main-loop speedup;
+<strong>6.1×</strong> fixed-domain speedup on ten GPUs in the largest
+test.</p>
+<p>Next: diagnostics, parameterizations, and coupled configurations.</p>
+<aside class="container notes">
+<p>[14:00–14:30] The main conclusion is that production-model
+acceleration is not a single-loop transformation. Standard Fortran
+supplies the central expression of concurrency, but residency, ordered
+work, blocking, compiler behavior, and validation make the whole model
+viable. The dynamic core demonstrates acceleration without maintaining a
+second solver source. Extending this to diagnostics and more complex
+parameterizations is the next step toward coupled production
+configurations. Thank the collaborators and invite questions. Planned
+spoken content is 14 minutes 30 seconds, leaving 30 seconds within a
+15-minute slot. If questions must fit inside the slot, omit the
+traversal animation and compress the module breakdown.</p>
+</aside>
+</section>
+<section id="backup-representative-block-kernel" class="slide level2">
+<h2>Backup: representative block kernel</h2>
+<pre class="fortran"><code>do jsb=js,je,njj ; do isb=is,ie,nii
+  ieb = min(isb + nii - 1, ie)
+  jeb = min(jsb + njj - 1, je)
+  iie = ieb - isb + 1
+  jje = jeb - jsb + 1
+
+  do concurrent (k=1:nz, jj=1:jje, ii=1:iie)
+    i = isb + ii - 1
+    j = jsb + jj - 1
+    visc_rem(ii,jj,k) = visc_rem_u(i,j,k)
+  enddo
+enddo ; enddo</code></pre>
+<p>Clip edge tiles; use local work arrays and global field indices.</p>
+<aside class="container notes">
+<p>Backup only. This is the representative continuity block kernel from
+the manuscript and September developer talk, not an entire solver. nii
+and njj are configured tile extents; iie and jje are the clipped extents
+of this tile. ii and jj index temporary, block-local arrays. i and j
+address the full-domain fields. The serial outer traversal is
+deliberately kept separate from the compact concurrent kernel. The
+developer talk also distinguishes center and face bounds; Fortran is
+case-insensitive, so capitalization alone does not create distinct
+variable names.</p>
+</aside>
+</section>
+<section id="backup-configuration-without-api-changes"
+class="slide level2">
+<h2>Backup: configuration without API changes</h2>
+<pre class="fortran"><code>subroutine CorAdCalc(...)
+  nkk = CS%nkblock
+  if (nkk == 0) nkk = GV%ke
+  call CorAdCalc_block(..., nkk, ...)
+end subroutine CorAdCalc</code></pre>
+<table>
+<colgroup>
+<col style="width: 64%" />
+<col style="width: 36%" />
+</colgroup>
+<tbody>
+<tr class="odd">
+<td><code>CONTINUITY_NIBLOCK / NJBLOCK</code></td>
+<td>Horizontal block extents</td>
+</tr>
+<tr class="even">
+<td><code>CONTINUITY_NKBLOCK</code></td>
+<td>Reconstruction layers</td>
+</tr>
+<tr class="odd">
+<td><code>CORIOLIS_ADV_NKBLOCK</code></td>
+<td>Advection layers</td>
+</tr>
+<tr class="even">
+<td><code>HORVISC_NKBLOCK</code></td>
+<td>Viscosity layers</td>
+</tr>
+</tbody>
+</table>
+<p><code>0</code> selects the full local extent in that direction.</p>
+<aside class="container notes">
+<p>Backup only. These are layout parameters shown in the September
+developer talk. The first table row abbreviates two full parameter
+names: CONTINUITY_NIBLOCK and CONTINUITY_NJBLOCK. Wrappers resolve the
+configured extent before calling the block implementation, preserving
+the existing module interface. Callers do not need separate CPU/GPU
+APIs. The code is schematic; ellipses stand for the original argument
+list.</p>
+</aside>
+</section>
+<section id="backup-device-resident-halo-exchange" class="slide level2">
+<h2>Backup: device-resident halo exchange</h2>
+<p><img data-src="img/fms_mpi.svg" style="width:70.0%"
+alt="FMS halo buffers exchanged through MPI from GPU-resident memory." /></p>
+<p>GPU packing → device buffers → GPU-aware MPI → GPU unpacking</p>
+<p>The transport beneath MPI remains system-dependent.</p>
+<aside class="container notes">
+<p>Backup only. The OpenACC runtime reconciles the device ID used by
+NVIDIA-generated kernels with the MPI rank's assigned device. Device
+pointers can be handed to MPI even when the MPI implementation stages
+the transfer through host memory. This is why GPU-aware and GPU-direct
+must not be used interchangeably.</p>
+</aside>
+</section>
+<section id="backup-module-level-h100-timings" class="slide level2">
+<h2>Backup: module-level H100 timings</h2>
+<p><img data-src="img/h100_module_timings.svg" height="440"
+alt="Six module timing panels versus horizontal domain area, with a curve for each H100 count." /></p>
+<p>Barotropic stepping includes communication in its timed region.</p>
+<aside class="container notes">
+<p>Backup only. The horizontal axis is global domain area, and each
+curve represents a fixed GPU count. Compare times at the same x value to
+assess the effect of adding GPUs for a fixed domain. Barotropic stepping
+includes internal communication in its timed region. These are raw
+time-per-step curves, not speedup panels; a dedicated speedup view is
+deferred.</p>
+</aside>
+</section>
+<section id="backup-derived-type-lifetimes" class="slide level2">
+<h2>Backup: derived-type lifetimes</h2>
+<pre class="fortran"><code>!$omp target enter data map(to: CS)
+!$omp target enter data map(to: CS%u, CS%v)
+
+! Later host-side changes need coordinated updates.
+! Blindly updating CS can overwrite device references:
+!$omp target update to(CS)</code></pre>
+<p>Treat object and component mappings as one residency problem.</p>
+<aside class="container notes">
+<p>Backup only. The final line illustrates a hazard, not a recommended
+operation. Initial mappings are compact; subsequent updates can
+overwrite device-side descriptors or pointers. Object lifetimes,
+component allocation, and host updates must be coordinated. Exact
+behavior and safe update patterns depend on the compiler and the derived
+type's definition.</p>
+</aside>
+</section>
+<section id="backup-acknowledgments" class="slide level2">
+<h2>Backup: acknowledgments</h2>
+<ul>
+<li>Pranay Reddy Kommera (NVIDIA): discussions motivating the blocking
+technique</li>
+<li>ACCESS-NRI: supported by the Australian Government's NCRIS</li>
+<li>NCI Australia: computational resources and services</li>
+<li>The MOM6 community and consortium</li>
+</ul>
+<aside class="container notes">
+<p>Backup only. Acknowledgments follow the manuscript. The full
+manuscript title is “Towards Performance-Portable GPU Acceleration of
+MOM6 with Standard Fortran and OpenMP.”</p>
+</aside>
+</section></section>
+    </div>
+  </div>
+
+  <script src="./reveal.js/dist/reveal.js"></script>
+  <script src="./reveal.js/plugin/math/math.js"></script>
+  <script src="./reveal.js/plugin/notes/notes.js"></script>
+  <script src="./reveal.js/plugin/highlight/highlight.js"></script>
+
+  <script>
+
+      // Full list of configuration options available at:
+      // https://github.com/hakimel/reveal.js#configuration
+      Reveal.initialize({
+        // Display controls in the bottom right corner
+        controls: true,
+        // Display a presentation progress bar
+        progress: true,
+        // Display the page number of the current slide
+        slideNumber: true,
+        // Push each slide change to the browser history
+        history: true,
+        // Enable keyboard shortcuts for navigation
+        keyboard: true,
+        // Enable the slide overview mode
+        overview: true,
+        // Vertical centering of slides
+        center: true,
+        // Enables touch navigation on devices with touch input
+        touch: true,
+        // Turns fragments on and off globally
+        fragments: true,
+        // Flags if we should show a help overlay when the questionmark
+        // key is pressed
+        help: true,
+        // Number of milliseconds between automatically proceeding to the
+        // next slide, disabled when set to 0, this value can be overwritten
+        // by using a data-autoslide attribute on your slides
+        autoSlide: 0,
+        // Stop auto-sliding after user input
+        autoSlideStoppable: true,
+        // Transition style
+        transition: 'slide', // none/fade/slide/convex/concave/zoom
+        // Transition speed
+        transitionSpeed: 'default', // default/fast/slow
+        // Transition style for full page slide backgrounds
+        backgroundTransition: 'fade', // none/fade/slide/convex/concave/zoom
+        // Number of slides away from the current that are visible
+        viewDistance: 3,
+        // The "normal" size of the presentation, aspect ratio will be preserved
+        // when the presentation is scaled to fit different resolutions. Can be
+        // specified using percentage units.
+        width: 1280,
+        height: 720,
+
+        // Optional reveal.js plugins
+        plugins : [ RevealMath, RevealNotes, RevealHighlight],
+        pdfMaxPagesPerSlide: 1,
+      });
+    </script>
+    </body>
+</html>
