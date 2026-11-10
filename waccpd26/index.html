@@ -87,7 +87,7 @@ class="title-slide slide level1">
 </table>
 <p>Port the model, not just an isolated kernel.</p>
 <aside class="container notes">
-<p>[0:30–1:30] MOM6 supports ongoing scientific research and operational
+<p>[0:30–1:15] MOM6 supports ongoing scientific research and operational
 applications. A replacement GPU implementation would create a second
 code to maintain and validate. Changing answers is also disruptive: we
 need to distinguish scientific changes from porting errors. CPU
@@ -98,11 +98,39 @@ new language or framework.</p>
 </aside>
 </section>
 
+<section id="an-ocean-of-different-flows"
+class="title-slide slide level1">
+<h1>An ocean of different flows</h1>
+<video data-autoplay loop muted playsinline controls preload="metadata"
+  style="width: 100%; height: 490px; object-fit: contain;"
+  aria-label="MOM6 ocean relative-vorticity visualization">
+  <source src="media/mom6_relvort.mp4" type="video/mp4">
+  <a href="media/mom6_relvort.mp4">Open the MOM6 ocean animation</a>.
+</video>
+<p>Different flows — different computational demands.</p>
+<aside class="container notes">
+<p>[1:15–1:45] Use about thirty seconds of this relative-vorticity
+movie, reused from the SEWG talk, rather than waiting for its full
+duration. Start with the ocean rather than the loops: MOM6 represents a
+range of circulation structures, and its solvers must support that
+diversity. Transition to the next slide: horizontal processes, vertical
+column work, and their coupling expose different dependencies. This is
+context for the model, not a claim that the movie's configuration has
+been GPU-ported or is the double-gyre timing experiment. Source context:
+Adcroft et al. (2019), <a
+href="https://doi.org/10.1029/2019MS001726">https://doi.org/10.1029/2019MS001726</a>.
+The video loops while this slide is visible; use the controls if browser
+autoplay is blocked.</p>
+</aside>
+</section>
+
 <section id="solvers-of-mom6" class="title-slide slide level1">
 <h1>Solvers of MOM6</h1>
 <div class="container solver-ocean">
-<p><img data-src="img/ocean_layers.svg"
-alt="Schematic moving ocean layers with a horizontal layer and a full-depth column highlighted." /></p>
+<object type="image/svg+xml" data="img/ocean_layers.svg"
+  aria-label="Animated ocean layers around a stationary highlighted column; click to pause">
+  <img src="img/ocean_layers.svg" alt="Ocean layers and a highlighted column">
+</object>
 </div>
 <svg class="solver-branches" viewBox="0 0 1200 48" aria-hidden="true">
   <path d="M600 0 V12 M600 12 L200 46 M600 12 V46 M600 12 L1000 46"
@@ -129,7 +157,7 @@ to vertical accumulation.</div>
 </div>
 </div>
 <aside class="container notes">
-<p>[1:30–2:30] The dynamic core advances velocities and layer
+<p>[1:45–2:30] The dynamic core advances velocities and layer
 thicknesses. Start with the ocean-layer sketch: these moving layers use
 ALE, or Arbitrary Lagrangian–Eulerian coordinates. It is a schematic,
 not model output. The branches connect the physical domain to three
