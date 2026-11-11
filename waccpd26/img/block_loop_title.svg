@@ -47,7 +47,7 @@
     <text class="code" x="0" y="91">jsb, isb</text>
     <text class="small" x="0" y="134">inner kernel</text>
     <text class="code" x="0" y="157">do concurrent</text>
-    <text class="code" x="0" y="179">  (k,jj,ii)</text>
+    <text class="code" x="0" y="179">  (jj,ii)</text>
   </g>
 
   <script><![CDATA[
