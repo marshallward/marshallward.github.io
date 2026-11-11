@@ -61,40 +61,42 @@
   </aside>
 </section>
 
-<section id="acceleration-without-disruption"
-class="title-slide slide level1">
-<h1>Acceleration without disruption</h1>
-<p>MOM6 is a community and operational ocean model.</p>
-<table>
-<colgroup>
-<col style="width: 28%" />
-<col style="width: 72%" />
-</colgroup>
-<tbody>
-<tr class="odd">
-<td><strong>Preserve</strong></td>
-<td>One Fortran codebase for CPU and GPU</td>
-</tr>
-<tr class="even">
-<td><strong>Verify</strong></td>
-<td>Retain validated, bitwise-identical answers</td>
-</tr>
-<tr class="odd">
-<td><strong>Perform</strong></td>
-<td>Gain GPU speed without losing CPU performance</td>
-</tr>
-</tbody>
-</table>
-<p>Port the model, not just an isolated kernel.</p>
+<section id="what-is-mom6" class="title-slide slide level1">
+<h1>What is MOM6?</h1>
+<div class="container mom6-intro">
+<div class="container mom6-intro-picture">
+<p><img data-src="img/mom6_regional.png"
+alt="Gulf Stream and eddies in MOM6&#39;s five-kilometer Northwest Atlantic regional configuration." /></p>
+<p>Gulf Stream and eddies: Northwest Atlantic, 5 km.</p>
+</div>
+<div class="container mom6-intro-context">
+<p><strong>The Modular Ocean Model</strong></p>
+<p>A community ocean model for regional and global simulations,
+forecasting, and climate research.</p>
+<p><strong>Operational code, evolving science</strong></p>
+<ul>
+<li>Validated answers → <strong>bit reproducibility</strong></li>
+<li>Ongoing CPU runs → <strong>no CPU slowdown</strong></li>
+<li>Shared development → <strong>one codebase</strong></li>
+</ul>
+</div>
+</div>
+<p>Accelerate the model without disrupting the science.</p>
 <aside class="container notes">
-<p>[0:30–1:15] MOM6 supports ongoing scientific research and operational
-applications. A replacement GPU implementation would create a second
-code to maintain and validate. Changing answers is also disruptive: we
-need to distinguish scientific changes from porting errors. CPU
-execution remains important, so a successful port must preserve that
-path and its performance. The approach is deliberately incremental,
-retaining the model's development practices rather than introducing a
-new language or framework.</p>
+<p>[0:30–1:15] MOM6 is the Modular Ocean Model, an open-source community
+ocean model used for regional and global simulations, forecasting, and
+climate research. The image, reused from the GTC poster, shows Gulf
+Stream and eddy structure in a 5 km Northwest Atlantic configuration. It
+illustrates the scientific application, not the GPU timing benchmark or
+a claim that this particular configuration is operationally deployed or
+GPU-validated. The model supports both ongoing research and operational
+applications: it is not a disposable benchmark kernel. A replacement GPU
+implementation would create a second code to maintain and validate.
+Changing answers is also disruptive: we need to distinguish scientific
+changes from porting errors. CPU execution remains important, so a
+successful port must preserve that path and its performance. The
+approach is deliberately incremental, retaining the model's development
+practices rather than introducing a new language or framework.</p>
 </aside>
 </section>
 
@@ -124,11 +126,40 @@ autoplay is blocked.</p>
 </aside>
 </section>
 
-<section id="solvers-of-mom6" class="title-slide slide level1">
-<h1>Solvers of MOM6</h1>
+<section id="solvers-ocean-intro"
+class="title-slide slide level1 auto-animate animate-group-solvers solver-intro"
+data-auto-animate="true" data-auto-animate-duration="1.0"
+data-auto-animate-easing="ease-in-out" data-auto-animate-id="solvers">
+<h1 class="auto-animate animate-group-solvers solver-intro"
+data-auto-animate="true" data-auto-animate-duration="1.0"
+data-auto-animate-easing="ease-in-out"
+data-auto-animate-id="solvers">Solvers of MOM6</h1>
 <div class="container solver-ocean">
-<object type="image/svg+xml" data="img/ocean_layers.svg"
-  aria-label="Animated ocean layers around a stationary highlighted column; click to pause">
+<object type="image/svg+xml" data="img/ocean_layers.svg" data-id="ocean-sketch"
+  aria-label="Animated ocean layers through a highlighted column with fixed horizontal bounds; click to pause">
+  <img src="img/ocean_layers.svg" alt="Ocean layers and a highlighted column">
+</object>
+</div>
+<aside class="container notes">
+<p>[1:45–2:00] Start with the ocean rather than the computational grids.
+The dynamic core advances velocities and layer thicknesses. These moving
+layers use ALE, or Arbitrary Lagrangian–Eulerian coordinates; the
+picture is a schematic, not model output. Advance once: the ocean sketch
+moves up and shrinks as three computational views appear beneath it.</p>
+</aside>
+</section>
+
+<section id="solvers-of-mom6"
+class="title-slide slide level1 auto-animate animate-group-solvers solver-overview"
+data-auto-animate="true" data-auto-animate-duration="1.0"
+data-auto-animate-easing="ease-in-out" data-auto-animate-id="solvers">
+<h1 class="auto-animate animate-group-solvers solver-overview"
+data-auto-animate="true" data-auto-animate-duration="1.0"
+data-auto-animate-easing="ease-in-out"
+data-auto-animate-id="solvers">Solvers of MOM6</h1>
+<div class="container solver-ocean">
+<object type="image/svg+xml" data="img/ocean_layers.svg" data-id="ocean-sketch"
+  aria-label="Animated ocean layers through a highlighted column with fixed horizontal bounds; click to pause">
   <img src="img/ocean_layers.svg" alt="Ocean layers and a highlighted column">
 </object>
 </div>
@@ -157,24 +188,21 @@ to vertical accumulation.</div>
 </div>
 </div>
 <aside class="container notes">
-<p>[1:45–2:30] The dynamic core advances velocities and layer
-thicknesses. Start with the ocean-layer sketch: these moving layers use
-ALE, or Arbitrary Lagrangian–Eulerian coordinates. It is a schematic,
-not model output. The branches connect the physical domain to three
-useful computational views; they do not depict a sequence of model
-operations. We classify its computations by dependency, not by the
-physical equation. Layered work offers horizontal concurrency and
-sometimes concurrency across layers. A column solve has horizontal
-independence but ordered work down each column. Mixed solvers combine
-these patterns: pressure depends on overlying layers, and the barotropic
-mode couples a two-dimensional solve to vertically integrated state. The
-slice illustrates a useful mixed-work loop pattern, not every phase of
-every mixed solver. The diagrams come from the GTC poster: orange
-highlights an independent column; teal highlights a layer or an i-k
-slice. Arrows indicate traversal/depth, not prescribed GPU thread
-geometry. Layer work can also be concurrent in k when there is no
-vertical dependence. This taxonomy tells us how to expose work; later we
-will see why it does not predict speedup by itself.</p>
+<p>[2:00–2:30] The branches connect the physical domain to three useful
+computational views; they do not depict a sequence of model operations.
+We classify its computations by dependency, not by the physical
+equation. Layered work offers horizontal concurrency and sometimes
+concurrency across layers. A column solve has horizontal independence
+but ordered work down each column. Mixed solvers combine these patterns:
+pressure depends on overlying layers, and the barotropic mode couples a
+two-dimensional solve to vertically integrated state. The slice
+illustrates a useful mixed-work loop pattern, not every phase of every
+mixed solver. The diagrams come from the GTC poster: orange highlights
+an independent column; teal highlights a layer or an i-k slice. Arrows
+indicate traversal/depth, not prescribed GPU thread geometry. Layer work
+can also be concurrent in k when there is no vertical dependence. This
+taxonomy tells us how to expose work; later we will see why it does not
+predict speedup by itself.</p>
 </aside>
 </section>
 
@@ -421,18 +449,19 @@ alt="EPYC CPU and November 9 GH200 main-loop times, with GPU speedup relative to
 <p>[9:30–10:45] The top panel shows time per step; the bottom shows CPU
 time divided by GPU time. The GPU curve uses the November 9 run series;
 the CPU reference is unchanged. The vertical subslide preserves the
-August/November comparison. The module plots also overlay both GPU
-series, labeled by date. Build/configuration equivalence between the GPU
-series still needs review before attributing differences to a specific
-change. Small cases provide insufficient work to keep the GPU occupied
-and amortize fixed launch costs. As the horizontal domain grows, the GPU
-overtakes the CPU and reaches about 3.18 times the performance at the
-largest size. The dotted vertical line marks the representative 384 by
-256 by 100 production layout. This is a main-loop result for a
-dynamic-core-focused benchmark, not a claim about the throughput of a
-full coupled climate model. It is also less than a pure memory-bandwidth
-ratio might suggest; the integrated solver includes ordered work,
-temporaries, reductions, communication, and compiler overheads.</p>
+August/November comparison. The module plots follow the same primary
+versus comparison-subslide layout. Build/configuration equivalence
+between the GPU series still needs review before attributing differences
+to a specific change. Small cases provide insufficient work to keep the
+GPU occupied and amortize fixed launch costs. As the horizontal domain
+grows, the GPU overtakes the CPU and reaches about 3.18 times the
+performance at the largest size. The dotted vertical line marks the
+representative 384 by 256 by 100 production layout. This is a main-loop
+result for a dynamic-core-focused benchmark, not a claim about the
+throughput of a full coupled climate model. It is also less than a pure
+memory-bandwidth ratio might suggest; the integrated solver includes
+ordered work, temporaries, reductions, communication, and compiler
+overheads.</p>
 </aside>
 </section>
 <section id="gh200-august-and-november" class="slide level2">
@@ -450,32 +479,46 @@ attribution of the improvement to a particular optimization. Press Right
 to continue the main talk.</p>
 </aside>
 </section></section>
+<section>
 <section id="structure-guides-porting-not-speedup"
 class="title-slide slide level1">
 <h1>Structure guides porting, not speedup</h1>
 <p><img data-src="img/module_scaling.svg" height="440"
-alt="EPYC CPU timings and August 9 and November 9 GH200 timings for six dynamic-core modules across problem sizes." /></p>
-<p>August baseline: viscosity ~1.2×; pressure/barotropic ~7.4–7.5× at
-the largest domain.</p>
+alt="EPYC CPU and November 9 GH200 timings for six dynamic-core modules across problem sizes." /></p>
+<p>Same source, different module performance.</p>
 <aside class="container notes">
-<p>[10:45–12:00] Both GPU series are overlaid with the same date labels
-and colors as the main-loop figure. The quoted speedups below refer to
-the original August dataset, not the new November overlay. Do not walk
-through every panel. Contrast horizontal viscosity, a seemingly
-favorable layered solver with only about 1.2 times speedup, with the
-mixed pressure and barotropic components reaching about 7.4 and 7.5
-times. Vertical friction retains serial column work yet reaches about
-twice CPU performance. Advection reaches about 1.8 times and continuity
-about 2.4 times. The dependency taxonomy is useful for deciding which
-loops may be concurrent and which must remain ordered, but realized
-performance also depends on memory access, private storage, launch
-counts, reductions, and the compiler. Integrated speedup is determined
-by the remaining costs, not an average of these module speedups. The
-figure is regenerated from the manuscript logs; its range title now
-matches the plotted sweep and the 64 by 64 reference grid.</p>
+<p>[10:45–12:00] The primary panels compare EPYC with the November GPU
+run series. The vertical subslide preserves the August/November overlay.
+Do not walk through every panel: contrast horizontal viscosity, a
+seemingly favorable layered solver, with the mixed pressure and
+barotropic components. Vertical friction also retains serial column work
+yet benefits from GPU execution once enough horizontal work is exposed.
+The dependency taxonomy is useful for deciding which loops may be
+concurrent and which must remain ordered, but realized performance also
+depends on memory access, private storage, launch counts, reductions,
+and the compiler. Integrated speedup is determined by the remaining
+costs, not an average of these module speedups. The figure is
+regenerated from the manuscript logs; its range title now matches the
+plotted sweep and the 64 by 64 reference grid.</p>
 </aside>
 </section>
-
+<section id="modules-august-and-november" class="slide level2">
+<h2>Modules: August and November</h2>
+<p><img data-src="img/module_scaling_comparison.svg" height="440"
+alt="EPYC CPU timings and both August 9 and November 9 GH200 timings for six dynamic-core modules across problem sizes." /></p>
+<p>Same CPU reference; both GH200 run series.</p>
+<aside class="container notes">
+<p>Optional comparison, outside the main talk's timing budget. These are
+the former three-series module panels. CPU is blue, August GPU orange,
+and November GPU green. The original manuscript's largest-domain
+speedups refer to August: about 1.2 times for horizontal viscosity, 1.8
+for advection, 2 for vertical friction, 2.4 for continuity, and 7.4–7.5
+for pressure/barotropic. Do not apply those numbers to the November
+curves. Build/configuration equivalence still needs review before
+attributing changes between the two run series to particular
+optimizations.</p>
+</aside>
+</section></section>
 <section id="the-resident-model-extends-across-gpus"
 class="title-slide slide level1">
 <h1>The resident model extends across GPUs</h1>
