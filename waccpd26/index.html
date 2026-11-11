@@ -220,7 +220,7 @@ class="title-slide slide level1">
 <div class="container loop-pattern">
 <div class="container loop-pattern-figure">
 <p><img data-src="img/loop_points.svg"
-alt="A fully filled ocean grid, colored by layer; i, j, and k are all concurrent." /></p>
+alt="A fully filled ocean grid with alternating checkerboard cell colors; i, j, and k are all concurrent." /></p>
 </div>
 <div class="container loop-pattern-code">
 <p><strong>Independent grid points</strong></p>
@@ -228,7 +228,8 @@ alt="A fully filled ocean grid, colored by layer; i, j, and k are all concurrent
   a(i,j,k) = b(i,j,k) + c(i,j,k)
 enddo</code></pre>
 <p>Every <code>(i,j,k)</code> iteration is independent.</p>
-<p>Colors distinguish layers, not execution order.</p>
+<p>Alternating colors emphasize independent cells, not execution
+order.</p>
 </div>
 </div>
 <p><code>do concurrent</code> does not itself require GPU execution.</p>
